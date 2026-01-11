@@ -2,17 +2,14 @@
 # By: Alp Erçikan, Qiyuan Li, Laura Maas, Mart van der Vleuten
 # Computational Research Skills (E&OR) (2025-2026-002-EBS4043)
 
-setwd("") # fill in
+library(tidyverse)
+library(lubridate)
 
+setwd("") # fill in
 
 ############################################################################
 # 1. Setup, load and clean data 
 ############################################################################
-suppressPackageStartupMessages({
-  library(tidyverse)
-  library(lubridate)
-})
-
 path <- "" # fill in
 raw <- readr::read_csv(path, show_col_types = FALSE)
 stopifnot(all(c("Date","Time","Duration","PatientType") %in% names(raw)))
@@ -40,7 +37,7 @@ dat <- dat %>%
 # working-hour filter
 dat <- dat %>%
   mutate(time_in_hours = hour(Timestamp) + minute(Timestamp)/60 + second(Timestamp)/3600) %>%
-  filter(time_in_hours >= 8, time_in_hours <= 17) # Shouldn't this be < 17, otherwise 17:59.59 included as well?? --> double check
+  filter(time_in_hours >= 8, time_in_hours <= 17)
 
 data_type1 <- dat %>% filter(PatientType == "Type 1")
 data_type2 <- dat %>% filter(PatientType == "Type 2")
@@ -729,65 +726,3 @@ simulate_one_day_inputs <- function() {
 cat("\n--- Phase 6.2 Sanity check: one simulated day of inputs ---\n")
 print(simulate_one_day_inputs())
 #View(simulate_one_day_inputs())
-
-############################################################################
-# ---- EXPORT SIMULATION INPUTS FOR PYTHON --------------------------------
-############################################################################
-# Safety checks
-
-stopifnot(exists("lambda_hat"), exists("mu_hat"), exists("sigma_hat"))
-stopifnot(exists("type2_daily"), exists("dur2_min"))
-
-# 1) Type 1 parametric inputs
-type1_params <- tibble(
-  parameter = c("lambda_per_day", "mu_duration_min", "sigma_duration_min"),
-  value = c(
-    unname(lambda_hat),
-    unname(mu_hat),
-    unname(sigma_hat)
-  )
-)
-
-write_csv(type1_params, "type1_params.csv")
-
-# 2) Type 2 empirical daily arrivals
-type2_daily_df <- tibble(
-  daily_arrivals = as.integer(type2_daily)
-)
-
-write_csv(type2_daily_df, "type2_daily_arrivals.csv")
-
-# 3) Type 2 empirical durations (minutes)
-type2_durations_df <- tibble(
-  duration_min = as.numeric(dur2_min)
-)
-
-write_csv(type2_durations_df, "type2_durations_min.csv")
-
-# 4) Metadata
-metadata <- tibble(
-  key = c(
-    "work_start_hour",
-    "work_end_hour",
-    "work_minutes",
-    "slot_policy",
-    "slot_minutes_type1",
-    "slot_minutes_type2"
-  ),
-  value = c(
-    8,
-    17,
-    540,
-    SLOT_POLICY,
-    round_to(slot_type1_min, 5),
-    round_to(slot_type2_min, 5)
-  )
-)
-
-write_csv(metadata, "simulation_metadata.csv")
-
-cat("\nCSV files written for Python DES:\n")
-cat("- type1_params.csv\n")
-cat("- type2_daily_arrivals.csv\n")
-cat("- type2_durations_min.csv\n")
-cat("- simulation_metadata.csv\n")
