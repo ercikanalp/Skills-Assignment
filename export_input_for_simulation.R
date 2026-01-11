@@ -1,4 +1,4 @@
-source("StatisticsPart.R")
+source("R/StatisticsPart.R")
 
 # Translate Results into Simulation Inputs 
 # Slot length recommendations 
