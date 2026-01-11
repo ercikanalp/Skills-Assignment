@@ -14,7 +14,7 @@ The objective is to translate empirical data into reliable inputs and assess ope
 * Type 2 patients: No parametric distribution is assumed for arrivals or scan durations.
 * The hospital is primarily interested in interpretable operational quantities, rather than model parameters alone.
 * Uncertainty in estimates is quantified using bootstrap methods, and robustness is assessed through simulation.
-Only working hours (08:00-17:00) are considered. Time outside working horus is treated as not passing.
+Only working hours (08:00-17:00) are considered. Time outside working hours is treated as not passing.
 
 # Data
 Input file: `ScanRecords.csv`. 
@@ -61,3 +61,4 @@ Multiple scheduling policies are evaluated and compared based on operational per
 * Qiyuan Li
 * Laura Maas
 * Mart van der Vleuten
+
