@@ -1,26 +1,19 @@
-# ============================================================
 # MRI Scheduling Case Study
 # By: Alp Erçikan, Qiyuan Li, Laura Maas, Mart van der Vleuten
-# Course: Computational Research Skills (E&OR) (2025-2026-002-EBS4043)
-# 
-# Phase 0: load + clean + timestamps + split by type
-# Phase 1: EDA (tables + plots)
-# Phase 2: hospital-relevant quantities
-# Phase 3: Type 1 parametric bootstrap inference
-# Phase 4: Type 2 nonparametric bootstrap + parametric fits
-# Phase 5: Monte Carlo robustness study for Type 2 (coverage & bias)
-# Phase 6: Translate results into simulation inputs + export CSVs for Python DES
-# ============================================================
+# Computational Research Skills (E&OR) (2025-2026-002-EBS4043)
+
 setwd("") # fill in
 
-# ---- Phase 0: Setup, load, clean --------------------------------------------
 
+############################################################################
+# 1. Setup, load and clean data 
+############################################################################
 suppressPackageStartupMessages({
   library(tidyverse)
   library(lubridate)
 })
 
-path <- "..." # fill in
+path <- "" # fill in
 raw <- readr::read_csv(path, show_col_types = FALSE)
 stopifnot(all(c("Date","Time","Duration","PatientType") %in% names(raw)))
 
@@ -47,7 +40,7 @@ dat <- dat %>%
 # working-hour filter
 dat <- dat %>%
   mutate(time_in_hours = hour(Timestamp) + minute(Timestamp)/60 + second(Timestamp)/3600) %>%
-  filter(time_in_hours >= 8, time_in_hours <= 17)
+  filter(time_in_hours >= 8, time_in_hours <= 17) # Shouldn't this be < 17, otherwise 17:59.59 included as well?? --> double check
 
 data_type1 <- dat %>% filter(PatientType == "Type 1")
 data_type2 <- dat %>% filter(PatientType == "Type 2")
@@ -55,8 +48,7 @@ data_type2 <- dat %>% filter(PatientType == "Type 2")
 cat("Rows total:", nrow(dat), "\n")
 cat("Type 1:", nrow(data_type1), " | Type 2:", nrow(data_type2), "\n")
 
-# ---- Helper: Working-minutes clock ------------------------------------------
-
+#Working-minutes clock
 to_working_minutes <- function(df, day_start = 8, day_end = 17) {
   df <- df %>%
     arrange(Date, Time)
@@ -77,9 +69,9 @@ to_working_minutes <- function(df, day_start = 8, day_end = 17) {
       working_minutes = workday_index * ((day_end - day_start) * 60) + minutes_in_day
     )
 }
-
-# ---- Phase 1: EDA ------------------------------------------------------------
-
+############################################################################
+# 2. EDA 
+############################################################################
 daily_counts <- dat %>%
   count(PatientType, Date, name = "n_calls") %>%
   arrange(PatientType, Date)
@@ -101,7 +93,7 @@ print(arrival_summary)
 p_daily_counts <- ggplot(daily_counts, aes(x = Date, y = n_calls)) +
   geom_col() +
   facet_wrap(~ PatientType, scales = "free_y") +
-  labs(title = "Daily number of calls (arrivals)", x = NULL, y = "Calls per day")
+  labs(title = "Daily Number of MRI Scan Requests Per Patient Type", x = NULL, y = "Calls per day")
 print(p_daily_counts)
 
 p_hist_counts <- ggplot(daily_counts, aes(x = n_calls)) +
@@ -133,6 +125,7 @@ interarrival_summary <- interarrival_by_type %>%
   )
 print(interarrival_summary)
 
+# Histogram of Arrival times 
 p_hist_gaps <- ggplot(
   interarrival_by_type %>% filter(!is.na(interarrival_min), interarrival_min >= 0),
   aes(x = interarrival_min)
@@ -141,15 +134,16 @@ p_hist_gaps <- ggplot(
   facet_wrap(~ PatientType, scales = "free_y") +
   labs(title = "Inter-arrival times (minutes, excluding non-working hours)",
        x = "Minutes between consecutive calls", y = "Frequency")
-print(p_hist_gaps)
+print(p_hist_gaps) 
 
+#Empirical Cumulative Distribution Function
 p_ecdf_gaps <- ggplot(
   interarrival_by_type %>% filter(!is.na(interarrival_min), interarrival_min >= 0),
   aes(x = interarrival_min)
 ) +
   stat_ecdf(geom = "step") +
   facet_wrap(~ PatientType) +
-  labs(title = "ECDF of inter-arrival times",
+  labs(title = "Empirical Distribution of interarrival times per patient type",
        x = "Minutes between consecutive calls", y = "F(t)")
 print(p_ecdf_gaps)
 
@@ -186,8 +180,9 @@ p_box_dur <- ggplot(dat, aes(x = PatientType, y = Duration * 60)) +
   labs(title = "Scan duration boxplot", x = NULL, y = "Duration (minutes)")
 print(p_box_dur)
 
-# ---- Phase 2: Hospital-relevant quantities ----------------------------------
-
+############################################################################
+# 3. Hospital-relevant quantities 
+############################################################################
 hospital_spec <- list(
   duration_thresholds_min = c(30, 45, 60),
   duration_quantiles = c(0.50, 0.90, 0.95),
@@ -247,8 +242,9 @@ metrics_table <- bind_rows(
 )
 print(metrics_table)
 
-# ---- Phase 3 & 4: Bootstrap Inference ---------------------------------------
-
+############################################################################
+# 4 & 5: Bootstrap Inference 
+############################################################################
 percentile_ci <- function(x, level = 0.95) {
   alpha <- (1 - level) / 2
   quantile(x, probs = c(alpha, 1 - alpha), na.rm = TRUE, names = FALSE)
@@ -267,7 +263,9 @@ mean_interarrival_working_min <- function(df) {
 set.seed(123)
 B <- 5000
 
-# --- Phase 3.1 Type 1 arrivals (Poisson parametric bootstrap)
+############################################################################
+# 4.1 Type 1 arrivals (Poisson parametric bootstrap)
+############################################################################
 type1_daily <- daily_arrivals_vec(data_type1)
 n_days1 <- length(type1_daily)
 lambda_hat <- mean(type1_daily)
@@ -296,42 +294,48 @@ type1_arrivals_ci <- tibble(
 )
 print(type1_arrivals_ci)
 
-# --- Phase 3.2 Type 1 durations (Normal parametric bootstrap)
+############################################################################
+# 4.2: Type 1 durations (Normal parametric bootstrap)
+############################################################################
 dur1_min <- data_type1$Duration * 60
 n1 <- length(dur1_min)
 mu_hat <- mean(dur1_min)
 sigma_hat <- sd(dur1_min)
 
 boot_dur1 <- replicate(B, {
-  sim <- rnorm(n1, mean = mu_hat, sd = sigma_hat)
+  sim <- rnorm(n1, mean= mu_hat, sd = sigma_hat)
   c(
     mean = mean(sim),
-    q90  = as.numeric(quantile(sim, 0.90)),
-    q95  = as.numeric(quantile(sim, 0.95)),
-    p30  = mean(sim > 30),
-    p45  = mean(sim > 45),
-    p60  = mean(sim > 60)
+    q50 = as.numeric(quantile(sim, 0.50)),
+    q90 = as.numeric(quantile(sim, 0.90)),
+    q95 = as.numeric(quantile(sim, 0.95)),
+    p30 = mean(sim > 30),
+    p45 = mean(sim > 45),
+    p60 = mean(sim > 60)
   )
 })
 boot_dur1 <- as.data.frame(t(boot_dur1))
 
 type1_duration_ci <- tibble(
   PatientType = "Type 1",
-  metric = c("Mean duration (min)", "q90 duration (min)", "q95 duration (min)",
+  metric = c("Mean duration (min)", "q50 duration (min)", "q90 duration (min)", "q95 duration (min)",
              "P(duration>30)", "P(duration>45)", "P(duration>60)"),
   estimate = c(mu_hat,
-               as.numeric(quantile(dur1_min, 0.90)),
-               as.numeric(quantile(dur1_min, 0.95)),
-               mean(dur1_min > 30),
-               mean(dur1_min > 45),
-               mean(dur1_min > 60)),
+              as.numeric(quantile(dur1_min, 0.50)),
+              as.numeric(quantile(dur1_min, 0.90)),
+              as.numeric(quantile(dur1_min, 0.95)),
+              mean(dur1_min > 30),
+              mean(dur1_min > 45),
+              mean(dur1_min > 60)),
   ci_low = c(percentile_ci(boot_dur1$mean)[1],
+             percentile_ci(boot_dur1$q50)[1],
              percentile_ci(boot_dur1$q90)[1],
              percentile_ci(boot_dur1$q95)[1],
              percentile_ci(boot_dur1$p30)[1],
              percentile_ci(boot_dur1$p45)[1],
              percentile_ci(boot_dur1$p60)[1]),
   ci_high = c(percentile_ci(boot_dur1$mean)[2],
+              percentile_ci(boot_dur1$q50)[2],
               percentile_ci(boot_dur1$q90)[2],
               percentile_ci(boot_dur1$q95)[2],
               percentile_ci(boot_dur1$p30)[2],
@@ -340,7 +344,9 @@ type1_duration_ci <- tibble(
 )
 print(type1_duration_ci)
 
-# --- Phase 4.1 Type 2 nonparametric bootstrap (days for arrivals, scans for duration)
+############################################################################
+# 5.1: Type 2 nonparametric bootstrap (days for arrivals, scans for duration)
+############################################################################
 type2_daily <- daily_arrivals_vec(data_type2)
 n_days2 <- length(type2_daily)
 
@@ -348,9 +354,9 @@ boot_arr2 <- replicate(B, {
   resamp <- sample(type2_daily, size = n_days2, replace = TRUE)
   c(
     mean = mean(resamp),
-    q50  = as.numeric(quantile(resamp, 0.50)),
-    q90  = as.numeric(quantile(resamp, 0.90)),
-    q95  = as.numeric(quantile(resamp, 0.95))
+    q50 = as.numeric(quantile(resamp, 0.50)),
+    q90 = as.numeric(quantile(resamp, 0.90)),
+    q95 =as.numeric(quantile(resamp, 0.95))
   )
 })
 boot_arr2 <- as.data.frame(t(boot_arr2))
@@ -380,12 +386,12 @@ boot_dur2 <- replicate(B, {
   resamp <- sample(dur2_min, size = n2, replace = TRUE)
   c(
     mean = mean(resamp),
-    q50  = as.numeric(quantile(resamp, 0.50)),
-    q90  = as.numeric(quantile(resamp, 0.90)),
-    q95  = as.numeric(quantile(resamp, 0.95)),
-    p30  = mean(resamp > 30),
-    p45  = mean(resamp > 45),
-    p60  = mean(resamp > 60)
+    q50 = as.numeric(quantile(resamp, 0.50)),
+    q90 = as.numeric(quantile(resamp, 0.90)),
+    q95 = as.numeric(quantile(resamp, 0.95)),
+    p30 = mean(resamp > 30),
+    p45 = mean(resamp > 45),
+    p60= mean(resamp > 60)
   )
 })
 boot_dur2 <- as.data.frame(t(boot_dur2))
@@ -418,17 +424,19 @@ type2_duration_ci <- tibble(
 )
 print(type2_duration_ci)
 
-# --- Phase 4.2 parametric comparison for Type 2 durations
+############################################################################
+# 5.2: parametric comparison for Type 2 durations
+############################################################################
 do_parametric_compare <- TRUE
 if (do_parametric_compare) {
   
   fit_lnorm <- MASS::fitdistr(dur2_min, densfun = "lognormal")
   meanlog_hat <- fit_lnorm$estimate["meanlog"]
-  sdlog_hat   <- fit_lnorm$estimate["sdlog"]
+  sdlog_hat <- fit_lnorm$estimate["sdlog"]
   
   fit_gamma <- MASS::fitdistr(dur2_min, densfun = "gamma")
   shape_hat <- fit_gamma$estimate["shape"]
-  rate_hat  <- fit_gamma$estimate["rate"]
+  rate_hat <- fit_gamma$estimate["rate"]
   
   qq_plot <- function(x, qfun, title) {
     n <- length(x)
@@ -463,8 +471,9 @@ if (do_parametric_compare) {
   print(type2_parametric_fit_summary)
 }
 
-# ---- Phase 5: Monte Carlo Robustness Study (Type 2 durations) -----------
-
+############################################################################
+# 6: Monte Carlo Robustness Study (Type 2 durations)
+############################################################################
 set.seed(2026)
 
 metrics_names <- c("mean", "q90", "q95", "p_gt_45", "p_gt_60")
@@ -490,8 +499,8 @@ bootstrap_ci_np <- function(x, B = 800, level = 0.95) {
   reps <- t(reps)
   
   est <- plugin_estimator(x)
-  ci_low  <- apply(reps, 2, quantile, probs = alpha, na.rm = TRUE)
-  ci_high <- apply(reps, 2, quantile, probs = 1 - alpha, na.rm = TRUE)
+  ci_low <- apply(reps, 2, quantile, probs = alpha, na.rm = TRUE)
+  ci_high<- apply(reps, 2, quantile, probs = 1 - alpha, na.rm = TRUE)
   
   list(est = est, ci_low = ci_low, ci_high = ci_high)
 }
@@ -593,10 +602,10 @@ coverage_wide <- results_table %>%
 
 print(coverage_wide)
 
-# ---- Phase 6: Translate Results into Simulation Inputs ------------------
-
-# --- Phase 6.1 Slot length recommendations (minutes)
-
+############################################################################
+# 7: Translate Results into Simulation Inputs 
+# 7.1: Slot length recommendations 
+############################################################################
 # You can switch between q90/q95:
 SLOT_POLICY <- "q95"   # choose "q90" or "q95"
 
@@ -634,14 +643,15 @@ slot_quantiles_table <- tibble(
 cat("\n--- Phase 6.1 Quantile-based slot options (minutes) ---\n")
 print(slot_quantiles_table)
 
-# --- Phase 6.2 Reusable stochastic input generators
+############################################################################
+# 7.2: Reusable stochastic input generators
+############################################################################
 
 WORK_START_H <- 8
 WORK_END_H   <- 17
 WORK_MINUTES <- (WORK_END_H - WORK_START_H) * 60  # 540
 
-# --- Type 1 arrivals: Poisson process over working day
-
+# Type 1 arrivals: Poisson process over working day
 # Uses exponential gaps with rate = lambda_per_day / WORK_MINUTES
 generate_arrivals_type1 <- function(lambda_per_day,
                                     work_minutes = WORK_MINUTES) {
@@ -658,7 +668,7 @@ generate_arrivals_type1 <- function(lambda_per_day,
   }
   arrivals  # minutes since 08:00
 }
-# --- Type 1 durations: Normal (truncate at small positive)
+# Type 1 durations: Normal (truncate at small positive)
 
 generate_duration_type1 <- function(n,
                                     mu_min,
@@ -670,8 +680,7 @@ generate_duration_type1 <- function(n,
   x
 }
 
-# --- Type 2 arrivals: resample daily count + uniform times
-
+# Type 2 arrivals: resample daily count + uniform times
 # 1) sample a daily count from empirical daily counts
 # 2) place arrivals uniformly across the working day
 generate_arrivals_type2 <- function(empirical_daily_counts,
@@ -683,7 +692,7 @@ generate_arrivals_type2 <- function(empirical_daily_counts,
   sort(runif(n, min = 0, max = work_minutes))
 }
 
-# --- Type 2 durations: resample from empirical durations
+#Type 2 durations: resample from empirical durations
 
 generate_duration_type2 <- function(n,
                                     empirical_durations_min) {
@@ -692,19 +701,17 @@ generate_duration_type2 <- function(n,
   sample(empirical_durations_min, size = n, replace = TRUE)
 }
 
-# --- Convenience: build empirical inputs once
-
+# Build empirical inputs once for convience 
 # empirical inputs for Type 2
-type2_daily_emp <- type2_daily                 # already computed earlier
-dur2_emp_min    <- dur2_min                    # already computed earlier
+type2_daily_emp <- type2_daily 
+dur2_emp_min <- dur2_min 
 
 # estimated parametric inputs for Type 1
-lambda1_hat <- lambda_hat                      # from Phase 3.1
-mu1_hat     <- mu_hat                          # from Phase 3.2
-sigma1_hat  <- sigma_hat                       # from Phase 3.2
+lambda1_hat <- lambda_hat # from 4.1
+mu1_hat <- mu_hat # from 4.2
+sigma1_hat <- sigma_hat # from 4.2
 
-# --- Quick sanity check: simulate one day
-
+# Sanity check: simulate one day
 simulate_one_day_inputs <- function() {
   a1 <- generate_arrivals_type1(lambda1_hat)
   d1 <- generate_duration_type1(length(a1), mu1_hat, sigma1_hat)
@@ -723,15 +730,15 @@ cat("\n--- Phase 6.2 Sanity check: one simulated day of inputs ---\n")
 print(simulate_one_day_inputs())
 #View(simulate_one_day_inputs())
 
+############################################################################
 # ---- EXPORT SIMULATION INPUTS FOR PYTHON --------------------------------
-
-# --- Safety checks
+############################################################################
+# Safety checks
 
 stopifnot(exists("lambda_hat"), exists("mu_hat"), exists("sigma_hat"))
 stopifnot(exists("type2_daily"), exists("dur2_min"))
 
-# --- 1) Type 1 parametric inputs
-
+# 1) Type 1 parametric inputs
 type1_params <- tibble(
   parameter = c("lambda_per_day", "mu_duration_min", "sigma_duration_min"),
   value = c(
@@ -743,24 +750,21 @@ type1_params <- tibble(
 
 write_csv(type1_params, "type1_params.csv")
 
-# --- 2) Type 2 empirical daily arrivals
-
+# 2) Type 2 empirical daily arrivals
 type2_daily_df <- tibble(
   daily_arrivals = as.integer(type2_daily)
 )
 
 write_csv(type2_daily_df, "type2_daily_arrivals.csv")
 
-# --- 3) Type 2 empirical durations (minutes)
-
+# 3) Type 2 empirical durations (minutes)
 type2_durations_df <- tibble(
   duration_min = as.numeric(dur2_min)
 )
 
 write_csv(type2_durations_df, "type2_durations_min.csv")
 
-# --- 4) Metadata
-
+# 4) Metadata
 metadata <- tibble(
   key = c(
     "work_start_hour",
