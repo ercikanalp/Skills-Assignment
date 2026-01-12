@@ -1,0 +1,7 @@
+key,value
+work_start_hour,8
+work_end_hour,17
+work_minutes,540
+slot_policy,q95
+slot_minutes_type1,40
+slot_minutes_type2,65
