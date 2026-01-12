@@ -14,17 +14,17 @@ class Inputs:
     lambda_per_day: float
     mu_duration_min: float
     sigma_duration_min: float
-    type2_daily_arrivals: np.ndarray          # integer counts per observed day
-    type2_durations_min: np.ndarray           # empirical durations in minutes
+    type2_daily_arrivals: np.ndarray
+    type2_durations_min: np.ndarray
     slot_minutes_type1: int
     slot_minutes_type2: int
-    work_minutes: int = 540                   # 9 hours * 60
+    work_minutes: int = 540
     seed: int = 123
 
 def _is_workday(day_index: int) -> bool:
-    """Assume day_index=0 is Monday. Workdays are Mon-Fri."""
-    dow = day_index % 7  # 0..6
-    return dow <= 4      # 0..4 => Mon..Fri
+
+    dow = day_index % 7
+    return dow <= 4
 
 def _next_workday(day_index: int) -> int:
     d = day_index + 1
@@ -33,13 +33,9 @@ def _next_workday(day_index: int) -> int:
     return d
 
 def _generate_calls_for_day(inputs: Inputs, rng: np.random.Generator, day_index: int) -> pd.DataFrame:
-    """
-    Generate call times within the working day for both types.
-    Returns DataFrame with columns: day_index, call_time_min, patient_type
-    """
+
     W = inputs.work_minutes
 
-    # Type 1: Poisson process over working minutes
     rate_per_min = inputs.lambda_per_day / W
     t = 0.0
     t1 = []
@@ -49,7 +45,6 @@ def _generate_calls_for_day(inputs: Inputs, rng: np.random.Generator, day_index:
             break
         t1.append(t)
 
-    # Type 2: sample daily count from empirical and place uniformly
     n2 = int(rng.choice(inputs.type2_daily_arrivals))
     t2 = np.sort(rng.uniform(0, W, size=n2)) if n2 > 0 else np.array([])
 
@@ -67,10 +62,8 @@ def _generate_calls_for_day(inputs: Inputs, rng: np.random.Generator, day_index:
     return df
 
 def _candidate_slot_starts(work_minutes: int, slot_len: int) -> np.ndarray:
-    """Slot starts (minutes since 08:00) such that slot fits within day."""
     if slot_len <= 0 or slot_len > work_minutes:
         return np.array([], dtype=int)
-    # start times at multiples of slot_len, from 0 to W-slot_len inclusive
     return np.arange(0, work_minutes - slot_len + 1, slot_len, dtype=int)
 
 def _book_earliest_slot(
@@ -81,12 +74,7 @@ def _book_earliest_slot(
     inputs: Inputs,
     policy: str
 ) -> Tuple[int, int, int]:
-    """
-    Book earliest available slot for the patient under given policy.
 
-    schedule key: (machine_id, day_index) -> set(start_times)
-    Returns (appointment_day, machine_id, slot_start_min)
-    """
     slot_len = inputs.slot_minutes_type1 if patient_type == "Type 1" else inputs.slot_minutes_type2
     starts = _candidate_slot_starts(inputs.work_minutes, slot_len)
     if len(starts) == 0:
@@ -95,10 +83,9 @@ def _book_earliest_slot(
     d = earliest_day
     while True:
         if not _is_workday(d):
-            d = _next_workday(d - 1)  # jump to next workday
+            d = _next_workday(d - 1)
             continue
 
-        # determine eligible machines
         if policy == "old":
             eligible = [0] if patient_type == "Type 1" else [1]
         elif policy == "new":
@@ -106,24 +93,22 @@ def _book_earliest_slot(
         else:
             raise ValueError("policy must be 'old' or 'new'")
 
-        # Scan slots in chronological order across eligible machines.
-        # We select the earliest (day, start_time), breaking ties by machine_id.
+
         best = None
         for m in eligible:
             booked = schedule.setdefault((m, d), set())
             for s in starts:
                 if s not in booked:
                     cand = (d, s, m)
-                    if best is None or cand < best:  # tuple order: day, start, machine
+                    if best is None or cand < best:
                         best = cand
-                    break  # earliest free slot on this machine for day d
+                    break
 
         if best is not None:
             appt_day, start_min, machine_id = best
             schedule[(machine_id, appt_day)].add(start_min)
             return appt_day, machine_id, int(start_min)
 
-        # no slot on this day, go to next workday
         d = _next_workday(d)
 
 def _simulate_day_operations(
@@ -131,13 +116,8 @@ def _simulate_day_operations(
     inputs: Inputs,
     rng: np.random.Generator,
 ) -> pd.DataFrame:
-    """
-    Given all patients scheduled for a specific day with assigned machine + slot start,
-    simulate actual scan durations and compute per-machine busy time and overtime.
-    Returns per-machine metrics for that day.
-    """
+
     if assigned_today.empty:
-        # return 2 machines with zeros
         return pd.DataFrame({
             "machine_id": [0, 1],
             "n_scans": [0, 0],
@@ -149,7 +129,6 @@ def _simulate_day_operations(
 
     df = assigned_today.copy()
 
-    # sample actual durations
     dur = np.zeros(len(df), dtype=float)
     is_t1 = (df["patient_type"].values == "Type 1")
     n1 = int(is_t1.sum())
@@ -170,12 +149,10 @@ def _simulate_day_operations(
             out_rows.append((m, 0, 0.0, 0.0, 0.0, 0.0))
             continue
 
-        # Machine processes sequentially; if a scan runs long, it pushes the next start (spillover).
         t = 0.0
         busy = 0.0
         for _, r in dm.iterrows():
             start = float(r["slot_start_min"])
-            # actual start is max(planned slot start, previous completion)
             t = max(t, start)
             t = t + float(r["actual_duration_min"])
             busy += float(r["actual_duration_min"])
@@ -193,18 +170,10 @@ def run_simulation(
     n_workdays: int = 250,
     policy: str = "old",
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Run simulation for n_workdays workdays (not calendar days).
-    We simulate a calendar where day_index=0 is Monday, and we continue until we have simulated
-    n_workdays workdays worth of operations.
 
-    Returns:
-      patients_df: call + assignment + realized durations
-      daily_machine_df: per workday, per machine metrics
-    """
     rng = np.random.default_rng(inputs.seed)
     machines = [0, 1]
-    schedule: Dict[Tuple[int, int], set] = {}  # (machine, day) -> set(slot_starts)
+    schedule: Dict[Tuple[int, int], set] = {}
     patients_records = []
     daily_records = []
 
@@ -216,7 +185,6 @@ def run_simulation(
             day_index += 1
             continue
 
-        # Generate calls for this day and book appointments
         calls = _generate_calls_for_day(inputs, rng, day_index)
 
         for _, c in calls.iterrows():
@@ -246,7 +214,6 @@ def run_simulation(
                 "slot_len_min": int(slot_len),
             })
 
-        # Simulate operations for THIS day (patients whose appointment_day == day_index)
         patients_df_partial = pd.DataFrame(patients_records)
         assigned_today = patients_df_partial[patients_df_partial["appointment_day"] == day_index].copy()
 
@@ -258,8 +225,7 @@ def run_simulation(
         day_index += 1
 
     patients_df = pd.DataFrame(patients_records)
-    # waiting time in working days (count of workdays between call_day and appointment_day)
-    # Because we simulate a week calendar, compute it accurately:
+
     def working_days_between(a: int, b: int) -> int:
         if b <= a:
             return 0
@@ -277,11 +243,6 @@ def run_simulation(
 
     daily_machine_df = pd.concat(daily_records, ignore_index=True)
 
-    # Attach actual durations back to patients_df for those simulated days.
-    # We re-simulated operations day-by-day; to keep the final patient-level durations,
-    # we can regenerate them consistently by re-running with the same seed and capturing per-day assignments.
-    # For KPI purposes (wait times/overtime/utilization), patient-level durations are optional.
-    # If needed, you can extend the simulation to store actual_duration_min inside _simulate_day_operations.
 
     return patients_df, daily_machine_df
 
